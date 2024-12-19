@@ -1,0 +1,151 @@
+// index.html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Quick Connect</title>
+    <script>
+    const configuration = {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' }
+        ]
+    };
+
+    let peerConnection;
+    let dataChannel;
+    const roomId = window.location.hash.substring(1) || Math.random().toString(36).substring(2,7);
+    
+    if (!window.location.hash) {
+        window.location.hash = roomId;
+    }
+
+    async function init() {
+        peerConnection = new RTCPeerConnection(configuration);
+        
+        dataChannel = peerConnection.createDataChannel('messagingChannel');
+        setupDataChannel(dataChannel);
+        
+        peerConnection.ondatachannel = (event) => {
+            setupDataChannel(event.channel);
+        };
+
+        peerConnection.onicecandidate = event => {
+            if (event.candidate) {
+                sendToSignalingServer({
+                    type: 'candidate',
+                    candidate: event.candidate,
+                    room: roomId
+                });
+            }
+        };
+
+        const response = await fetch(`/api/check-room/${roomId}`);
+        const data = await response.json();
+        
+        if (data.isFirst) {
+            document.getElementById('status').textContent = 'Waiting for peer... Share this URL!';
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            
+            sendToSignalingServer({
+                type: 'offer',
+                sdp: offer,
+                room: roomId
+            });
+        } else {
+            document.getElementById('status').textContent = 'Connecting...';
+            listenForOffer();
+        }
+    }
+
+    function setupDataChannel(channel) {
+        channel.onopen = () => {
+            document.getElementById('status').textContent = 'Connected!';
+            document.getElementById('messageForm').style.display = 'block';
+        };
+        
+        channel.onmessage = event => {
+            const messageDiv = document.createElement('div');
+            messageDiv.textContent = 'Peer: ' + event.data;
+            document.getElementById('messages').appendChild(messageDiv);
+        };
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('messageInput');
+        const message = input.value;
+        
+        if (message && dataChannel.readyState === 'open') {
+            dataChannel.send(message);
+            const messageDiv = document.createElement('div');
+            messageDiv.textContent = 'You: ' + message;
+            document.getElementById('messages').appendChild(messageDiv);
+            input.value = '';
+        }
+    }
+
+    async function sendToSignalingServer(data) {
+        await fetch('/api/signal', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+    }
+
+    async function listenForOffer() {
+        const response = await fetch(`/api/get-offer/${roomId}`);
+        const data = await response.json();
+        
+        if (data.offer) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            
+            sendToSignalingServer({
+                type: 'answer',
+                sdp: answer,
+                room: roomId
+            });
+        }
+    }
+    </script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #messages {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+            height: 300px;
+            overflow-y: auto;
+        }
+        #messageForm {
+            display: none;
+        }
+        input[type="text"] {
+            width: 80%;
+            padding: 5px;
+        }
+        button {
+            padding: 5px 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Quick Connect</h1>
+    <div id="status">Initializing...</div>
+    <div id="messages"></div>
+    <div id="messageForm">
+        <input type="text" id="messageInput" placeholder="Type your message...">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+    <script>
+        init();
+    </script>
+</body>
+</html>
