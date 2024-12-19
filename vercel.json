@@ -1,0 +1,8 @@
+{
+    "version": 2,
+    "routes": [
+      { "handle": "filesystem" },
+      { "src": "/api/check-room/.*", "dest": "/api/check-room/[roomId].js" },
+      { "src": "/api/signal", "dest": "/api/signal.js" }
+    ]
+  }
